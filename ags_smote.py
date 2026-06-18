@@ -69,6 +69,10 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
         gaussian_scale: float = 0.30,
         quality_margin: float = 0.92,
         max_attempt_factor: int = 20,
+        truncation_attempts: int = 20,
+        cluster_bounds: Tuple[int, int] = (2, 12),
+        score_weights: Tuple[float, float, float, float] = (0.33, 0.24, 0.23, 0.20),
+        safety_threshold: float = 0.50,
         use_gpu: bool = False,
         random_state: Optional[int] = None,
     ) -> None:
@@ -79,6 +83,10 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
         self.gaussian_scale = gaussian_scale
         self.quality_margin = quality_margin
         self.max_attempt_factor = max_attempt_factor
+        self.truncation_attempts = truncation_attempts
+        self.cluster_bounds = cluster_bounds
+        self.score_weights = score_weights
+        self.safety_threshold = safety_threshold
         self.use_gpu = use_gpu
         self.random_state = random_state
 
@@ -95,9 +103,8 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
             self.used_backend_ = "numpy"
             return np
 
-    @staticmethod
-    def _truncated_gaussian(rng: np.random.RandomState, mean: float = 0.5, std: float = 0.30) -> float:
-        for _ in range(20):
+    def _truncated_gaussian(self, rng: np.random.RandomState, mean: float = 0.5, std: float = 0.30) -> float:
+        for _ in range(self.truncation_attempts):
             value = rng.normal(mean, std)
             if 0.0 <= value <= 1.0:
                 return float(value)
@@ -145,7 +152,8 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
         if n_minority < 4:
             return np.ones(n_minority)
 
-        n_clusters = int(np.clip(np.sqrt(n_minority), 2, 12))
+        c_min, c_max = self.cluster_bounds
+        n_clusters = int(np.clip(np.sqrt(n_minority), c_min, c_max))
         km = MiniBatchKMeans(n_clusters=n_clusters, random_state=self.random_state, batch_size=256, n_init=3)
         labels = km.fit_predict(X_min_space)
         counts = np.bincount(labels)
@@ -161,9 +169,10 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
         """
 
         X, y = check_X_y(X, y, accept_sparse=False, dtype=np.float64)
+        if len(self.score_weights) != 4:
+            raise ValueError('score_weights must contain 4 values: density, boundary, safety, cluster')
         rng = check_random_state(self.random_state)
-        xp = self._backend()
-        _ = xp  # backend retained for extension and metadata
+        self._backend()
 
         X_space = self._prepare_space(X)
 
@@ -196,6 +205,7 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
             needed = int(max(1, np.rint(base_needed * sep_factor)))
 
             min_tree = KDTree(X_min_space)
+            maj_tree = KDTree(X_maj_space)
             all_tree = KDTree(X_space)
 
             # Density signal from local minority neighborhood.
@@ -218,11 +228,12 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
             cluster_priority = self._cluster_priority(X_min_space)
 
             # Multi-perspective fusion score.
+            w_density, w_boundary, w_safety, w_cluster = self.score_weights
             score = (
-                0.33 * density_priority
-                + 0.24 * boundary_score
-                + 0.23 * safety_score
-                + 0.20 * self._normalize(cluster_priority)
+                w_density * density_priority
+                + w_boundary * boundary_score
+                + w_safety * safety_score
+                + w_cluster * self._normalize(cluster_priority)
             )
             score = np.clip(score, 1e-9, None)
             probs = score / score.sum()
@@ -249,12 +260,12 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
                 # Quality validation: keep only safe and informative candidates.
                 cand_space = candidate if self.manifold_model_ is None else self.manifold_model_.transform(candidate.reshape(1, -1))[0]
                 d_min, _ = min_tree.query(cand_space.reshape(1, -1), k=1)
-                d_maj, _ = KDTree(X_maj_space).query(cand_space.reshape(1, -1), k=1)
+                d_maj, _ = maj_tree.query(cand_space.reshape(1, -1), k=1)
                 ratio_ok = float(d_min[0][0]) * self.quality_margin <= float(d_maj[0][0])
 
                 _, cand_mix = all_tree.query(cand_space.reshape(1, -1), k=k_mix)
                 cand_maj_ratio = float(np.mean(y[cand_mix[0]] != cls))
-                safety_ok = cand_maj_ratio <= 0.50
+                safety_ok = cand_maj_ratio <= self.safety_threshold
 
                 if ratio_ok and safety_ok:
                     X_syn_all.append(candidate)

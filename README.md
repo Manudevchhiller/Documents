@@ -4,10 +4,10 @@
 
 This repository now includes a **next-generation oversampling model** designed from the referenced papers:
 
-- **Implementation:** `/home/runner/work/Documents/Documents/ags_smote.py`
-- **Unit tests:** `/home/runner/work/Documents/Documents/tests/test_ags_smote.py`
-- **Example benchmark notebook:** `/home/runner/work/Documents/Documents/examples/ags_benchmark.ipynb`
-- **Research-style writeup:** `/home/runner/work/Documents/Documents/AGS_RESEARCH_NOTE.md`
+- **Implementation:** `ags_smote.py`
+- **Unit tests:** `tests/test_ags_smote.py`
+- **Example benchmark notebook:** `examples/ags_benchmark.ipynb`
+- **Research-style writeup:** `AGS_RESEARCH_NOTE.md`
 
 ### AGS highlights
 
