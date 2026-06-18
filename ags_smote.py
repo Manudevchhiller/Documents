@@ -104,6 +104,7 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
             return np
 
     def _truncated_gaussian(self, rng: np.random.RandomState, mean: float = 0.5, std: float = 0.30) -> float:
+        value = mean
         for _ in range(self.truncation_attempts):
             value = rng.normal(mean, std)
             if 0.0 <= value <= 1.0:
@@ -170,7 +171,7 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
 
         X, y = check_X_y(X, y, accept_sparse=False, dtype=np.float64)
         if len(self.score_weights) != 4:
-            raise ValueError('score_weights must contain 4 values: density, boundary, safety, cluster')
+            raise ValueError("score_weights must contain 4 values: density, cluster, boundary, safety")
         rng = check_random_state(self.random_state)
         self._backend()
 
@@ -228,12 +229,12 @@ class AdaptiveGeometricSMOTE(BaseEstimator):
             cluster_priority = self._cluster_priority(X_min_space)
 
             # Multi-perspective fusion score.
-            w_density, w_boundary, w_safety, w_cluster = self.score_weights
+            w_density, w_cluster, w_boundary, w_safety = self.score_weights
             score = (
                 w_density * density_priority
+                + w_cluster * self._normalize(cluster_priority)
                 + w_boundary * boundary_score
                 + w_safety * safety_score
-                + w_cluster * self._normalize(cluster_priority)
             )
             score = np.clip(score, 1e-9, None)
             probs = score / score.sum()
